@@ -1,0 +1,8 @@
+tensorflow
+efficientnet
+numpy
+opencv-python
+pillow
+matplotlib
+pyyaml
+scikit-learn
