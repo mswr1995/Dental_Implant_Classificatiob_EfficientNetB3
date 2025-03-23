@@ -6,8 +6,9 @@ import random
 import logging
 from PIL import Image
 import imagehash
-from typing import Dict, List
+from typing import Dict, List, Tuple
 from collections import defaultdict
+import matplotlib.pyplot as plt  # For debugging visualizations
 
 logging.basicConfig(
     level=logging.INFO,
@@ -21,13 +22,14 @@ class DuplicateInfo:
         self.duplicate_groups = defaultdict(list)
         self.kept_images = set()
         self.removed_images = set()
-        self.hash_size = 16  # Larger hash size for more precise matching
+        self.hash_size = 12  # MUCH LARGER hash size for dental X-rays (was too small at 4)
 
 class DataProcessor:
-    def __init__(self, raw_data_path: str, output_path: str, image_size: int = 512):
+    def __init__(self, raw_data_path: str, output_path: str, image_size: int = 512, debug=False):
         self.project_root = Path(__file__).parent.parent.parent
         self.raw_data_path = Path(raw_data_path)
         self.output_path = Path(output_path)
+        self.debug = debug
         
         if not self.raw_data_path.is_absolute():
             self.raw_data_path = self.project_root / self.raw_data_path
@@ -43,74 +45,144 @@ class DataProcessor:
             'class_distribution': defaultdict(int),
             'split_distribution': defaultdict(int),
             'duplicates_found': 0,
-            'duplicates_removed': 0
+            'duplicates_removed': 0,
+            'original_size_stats': defaultdict(int)
         }
+        
+        # Create debug directory if needed
+        if self.debug:
+            self.debug_dir = self.project_root / 'data/debug'
+            self.debug_dir.mkdir(parents=True, exist_ok=True)
 
-    def process_image(self, image_path: Path) -> np.ndarray:
-        """Process a single image with minimal transformations."""
+    def apply_radiographic_enhancement(self, image: np.ndarray) -> np.ndarray:
+        """Apply specialized enhancements for dental radiographs with safer parameters."""
+        # Make a copy to avoid modifying the original
+        result = image.copy()
+        
+        # 1. Apply a milder bilateral filter
+        # Less aggressive parameters to preserve more detail
+        denoised = cv2.bilateralFilter(result, 3, 25, 25)
+        
+        # 2. Apply gentler CLAHE
+        clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
+        enhanced = clahe.apply(denoised)
+        
+        # 3. Apply a gentler sharpening
+        kernel = np.array([[-0.5, -0.5, -0.5], 
+                           [-0.5,  5.0, -0.5], 
+                           [-0.5, -0.5, -0.5]])
+        sharpened = cv2.filter2D(enhanced, -1, kernel)
+        
+        # Debug: Save intermediate steps if needed
+        if self.debug and random.random() < 0.01:  # Save 1% of images for debugging
+            debug_path = self.debug_dir / f"debug_{random.randint(1000, 9999)}"
+            debug_path.mkdir(exist_ok=True)
+            cv2.imwrite(str(debug_path / "1_original.jpg"), image)
+            cv2.imwrite(str(debug_path / "2_denoised.jpg"), denoised)
+            cv2.imwrite(str(debug_path / "3_enhanced.jpg"), enhanced)
+            cv2.imwrite(str(debug_path / "4_sharpened.jpg"), sharpened)
+        
+        return sharpened
+
+    def process_image(self, image_path: Path) -> Tuple[np.ndarray, dict]:
+        """Process a single image with radiographic-specific enhancements."""
         # Read image in grayscale
         image = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
         if image is None:
             raise ValueError(f"Failed to load image: {image_path}")
-
-        # Calculate padding to maintain aspect ratio
+            
+        # Record original dimensions for statistics
         h, w = image.shape
+        metadata = {'original_height': h, 'original_width': w}
+        self.stats['original_size_stats'][f"{w}x{h}"] += 1
+        
+        # Calculate padding to maintain aspect ratio
         scale = min(self.image_size / h, self.image_size / w)
         new_h, new_w = int(h * scale), int(w * scale)
         
-        # Resize maintaining aspect ratio
-        resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        # Resize maintaining aspect ratio with high-quality interpolation
+        if scale < 1:  # Downsampling
+            resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        else:  # Upsampling
+            resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
         
-        # Create padded image
-        padded = np.zeros((self.image_size, self.image_size), dtype=np.uint8)
+        # Create padded image (use 128 as padding value instead of 0 for better visualization)
+        padded = np.ones((self.image_size, self.image_size), dtype=np.uint8) * 128
         h_offset = (self.image_size - new_h) // 2
         w_offset = (self.image_size - new_w) // 2
         padded[h_offset:h_offset+new_h, w_offset:w_offset+new_w] = resized
         
-        # Normalize to [0, 255]
-        if padded.max() > padded.min():
-            padded = ((padded - padded.min()) * 255 / (padded.max() - padded.min())).astype(np.uint8)
-            
-        return padded
+        # Apply radiographic-specific enhancements
+        enhanced = self.apply_radiographic_enhancement(padded)
+        
+        # Ensure proper normalization - prevent black images by checking min/max
+        min_val, max_val = enhanced.min(), enhanced.max()
+        if max_val > min_val:  # Only normalize if there's a range of values
+            enhanced = np.clip(((enhanced - min_val) * 255.0 / (max_val - min_val)), 0, 255).astype(np.uint8)
+        
+        # If we somehow still have a black image, use the original padded version
+        if enhanced.mean() < 10:  # Very dark image
+            logger.warning(f"Enhancement produced very dark image for {image_path.name}, using original")
+            enhanced = padded
+        
+        return enhanced, metadata
 
     def detect_duplicates(self, image_paths: List[Path]) -> Dict[str, List[Path]]:
-        """Detect duplicates using conservative matching."""
+        """Detect duplicates using perceptual hashing with dental X-ray specific settings."""
         hash_dict = {}
-        logger.info("Starting duplicate detection...")
+        duplicate_groups = {}
+        logger.info("Starting duplicate detection with dental X-ray specific settings...")
+        
+        # Much stricter threshold for dental X-rays which naturally look similar
+        threshold = 2  # Reduced from 5 to be much stricter
         
         for img_path in image_paths:
             try:
                 with Image.open(img_path) as img:
                     if img.mode != 'L':
                         img = img.convert('L')
-                    img_hash = str(imagehash.whash(img, hash_size=self.duplicate_info.hash_size))
+                    # Use a combination of perceptual hash and difference hash for more accuracy
+                    p_hash = imagehash.phash(img, hash_size=self.duplicate_info.hash_size)
+                    d_hash = imagehash.dhash(img, hash_size=self.duplicate_info.hash_size)
+                    # Create a combined hash string
+                    img_hash_str = f"{p_hash}_{d_hash}"
                 
-                if img_hash in hash_dict:
-                    # Only consider as duplicate if extremely similar
-                    existing_path = hash_dict[img_hash][0]
-                    if self._are_similar_filenames(img_path, existing_path):
-                        hash_dict[img_hash].append(img_path)
+                # Compare with existing hashes - exact match only for dental X-rays
+                found_duplicate = False
+                for existing_hash_str, paths in hash_dict.items():
+                    if existing_hash_str == img_hash_str:  # Exact match required
+                        if existing_hash_str not in duplicate_groups:
+                            duplicate_groups[existing_hash_str] = paths.copy()
+                        
+                        duplicate_groups[existing_hash_str].append(img_path)
                         self.duplicate_info.duplicates_found += 1
-                        logger.info(f"Found duplicate: {img_path}")
-                else:
-                    hash_dict[img_hash] = [img_path]
+                        logger.info(f"Found exact duplicate: {img_path.name}")
+                        found_duplicate = True
+                        break
+                
+                if not found_duplicate:
+                    hash_dict[img_hash_str] = [img_path]
                 
             except Exception as e:
                 logger.error(f"Error processing {img_path}: {e}")
                 continue
         
-        return {k: v for k, v in hash_dict.items() if len(v) > 1}
+        # Additional validation - reject groups where the images are from different classes
+        valid_duplicate_groups = {}
+        for hash_str, group in duplicate_groups.items():
+            # Extract class from path (assuming class is parent directory name)
+            classes = set(path.parent.name for path in group)
+            if len(classes) == 1:  # All images in group are from same class
+                valid_duplicate_groups[hash_str] = group
+            else:
+                logger.warning(f"Rejected duplicate group with mixed classes: {classes}")
+        
+        logger.info(f"Found {len(valid_duplicate_groups)} valid duplicate groups with {sum(len(g)-1 for g in valid_duplicate_groups.values())} duplicates")
+        return valid_duplicate_groups
 
     def _are_similar_filenames(self, path1: Path, path2: Path) -> bool:
-        """Check if filenames suggest images are duplicates."""
-        name1 = path1.stem.lower()
-        name2 = path2.stem.lower()
-        
-        # Remove common suffixes and numbers
-        base1 = ''.join(c for c in name1 if not c.isdigit())
-        base2 = ''.join(c for c in name2 if not c.isdigit())
-        
-        return base1 == base2 or base1.startswith(base2) or base2.startswith(base1)
+        """Always returns True to disable filename-based filtering."""
+        return True
 
     def create_splits(self):
         """Create train/val/test splits."""
@@ -150,7 +222,7 @@ class DataProcessor:
         
         for img_path in image_paths:
             try:
-                processed_image = self.process_image(img_path)
+                processed_image, metadata = self.process_image(img_path)
                 output_path = output_dir / img_path.name
                 cv2.imwrite(str(output_path), processed_image)
                 
@@ -165,22 +237,38 @@ class DataProcessor:
     def process_dataset(self):
         """Main processing method."""
         try:
-            logger.info("Starting dataset processing...")
+            logger.info(f"Starting dataset processing with image size {self.image_size}x{self.image_size}...")
             
             # Collect all image paths
             all_images = []
             for class_dir in self.raw_data_path.iterdir():
                 if class_dir.is_dir():
-                    all_images.extend(list(class_dir.glob('*.jpg')))
+                    img_list = list(class_dir.glob('*.jpg'))
+                    logger.info(f"Found {len(img_list)} images in {class_dir.name}")
+                    all_images.extend(img_list)
+            
+            if not all_images:
+                logger.warning("No images found in the dataset directory!")
+                return
+                
+            logger.info(f"Found total of {len(all_images)} images across all classes")
             
             # Detect and handle duplicates
             duplicate_groups = self.detect_duplicates(all_images)
             
             # Keep only one image from each duplicate group
-            for group in duplicate_groups.values():
-                best_image = max(group, key=lambda x: x.stat().st_size)
-                self.duplicate_info.kept_images.add(best_image)
-                self.duplicate_info.removed_images.update(set(group) - {best_image})
+            for _, group in duplicate_groups.items():
+                if len(group) > 1:  # Only process actual groups with duplicates
+                    # Choose the image with the highest quality (using file size as proxy)
+                    best_image = max(group, key=lambda x: x.stat().st_size)
+                    self.duplicate_info.kept_images.add(best_image)
+                    self.duplicate_info.removed_images.update(set(group) - {best_image})
+                    logger.info(f"Keeping {best_image.name}, removing {len(group)-1} duplicates")
+            
+            # Output duplicate information
+            logger.info(f"Found {self.duplicate_info.duplicates_found} duplicate images")
+            logger.info(f"Keeping {len(self.duplicate_info.kept_images)} unique images")
+            logger.info(f"Removing {len(self.duplicate_info.removed_images)} duplicate images")
             
             # Create directory structure and process images
             self.create_splits()
@@ -190,6 +278,8 @@ class DataProcessor:
             
         except Exception as e:
             logger.error(f"Error during dataset processing: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             raise
 
     def _log_statistics(self):
@@ -212,7 +302,8 @@ def main():
     processor = DataProcessor(
         raw_data_path='data/data_raw',
         output_path='data/data_processed',
-        image_size=512
+        image_size=512,
+        debug=True  # Enable debugging
     )
     processor.process_dataset()
 
