@@ -3,7 +3,7 @@
 
 ### 1. Project Overview
 
-This report outlines a comprehensive plan for developing a machine learning system to classify dental implant brands and models from radiographic images (periapical and panoramic X-rays). With a combined dataset of 5,000-7,000 images, we aim to build both transfer learning and custom deep learning models to achieve optimal classification accuracy.
+This report outlines a comprehensive plan for developing a machine learning system to classify dental implant brands and models from radiographic images (periapical and panoramic X-rays). With a combined dataset of 12,000-15,000 images, we aim to build both transfer learning and custom deep learning models to achieve optimal classification accuracy.
 
 ### 2. Dataset Preparation
 
@@ -27,20 +27,26 @@ The `data_process.py` script implements a comprehensive preprocessing pipeline:
 8. **Normalization**: Scales pixel values appropriately for model input
 9. **Debug Capability**: Optional debug mode saves intermediate processing steps for quality verification
 
-#### 2.3 Data Augmentation Strategy
+#### 2.3 Data Augmentation Strategy (Planned for Training Phase)
+The following augmentation techniques will be implemented during model training to improve generalization and robustness:
+
 - **Geometric Transformations**:
-  - Rotation (±15°)
-  - Width/height shifts (±10%)
-  - Zoom range (0.9-1.1)
-  - Horizontal flips
+  - Rotation (±15°) - Accounts for variable implant orientations in radiographs
+  - Width/height shifts (±10%) - Simulates different implant positions
+  - Zoom range (0.9-1.1) - Handles variable magnification factors
+  - Horizontal flips - Increases dataset diversity
+
 - **Intensity Adjustments**:
-  - Brightness variation (±10%)
-  - Contrast adjustment (0.8-1.2)
-  - Simulated noise addition
+  - Brightness variation (±10%) - Simulates different exposure settings
+  - Contrast adjustment (0.8-1.2) - Accounts for radiograph quality variations
+  - Simulated noise addition - Improves robustness to image noise
+
 - **Domain-Specific Augmentations**:
-  - Simulated exposure variations
-  - Bone density variations
-  - Metal artifact simulation
+  - Simulated exposure variations - Mirrors different X-ray machine settings
+  - Bone density variations - Accounts for patient anatomical differences
+  - Metal artifact simulation - Helps model recognize implants despite common artifacts
+
+Note: These augmentations will be implemented using TensorFlow's ImageDataGenerator during the model training phase, not in the preprocessing pipeline.
 
 ### 3. Transfer Learning Implementation
 
