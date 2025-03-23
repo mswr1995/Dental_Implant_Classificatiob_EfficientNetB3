@@ -2,22 +2,30 @@ dental-implant-classification/
 
 ├── data/
 │   ├── data_collected/                  # Original YOLOv5 datasets
+│   │
 │   ├── data_raw/                        # Unified dataset
 │   │   ├── Bego/
 │   │   ├── Bicon/
 │   │   └── ...
+│   │   └── .gitkeep                     # Empty file to preserve folder in git
+│   │
 │   ├── data_processed/                  # Processed dataset
 │   │   ├── train/
 │   │   │   ├── Bego/
 │   │   │   ├── Bicon/
 │   │   │   └── ...
 │   │   ├── val/
-│   │   └── test/
+│   │   ├── test/
+│   │   └── .gitkeep                     # Empty file to preserve folder in git
+│   │
+│   ├── debug/                           # Debug output folder (contents gitignored)
+│   │   └── .gitkeep                     # Empty file to preserve folder in git
 │   │
 │   └── scripts/                         # Data processing scripts
 │       ├── organize_dataset.py          # Combines YOLOv5 datasets into unified format
-│       ├── data_analysis.R             # Statistical analysis of dataset
-│       └── data_visualization.ipynb    # Dataset visualization and exploration
+│       ├── data_process.py              # Main image processing script
+│       ├── data_analysis.R              # Statistical analysis of dataset
+│       └── data_visualization.ipynb     # Dataset visualization and exploration
 
 ├── notebooks/                           # Experimentation and development
 │   ├── 1_exploratory_analysis.ipynb    # Initial data exploration
@@ -54,8 +62,9 @@ Project Workflow and Folder Usage Guide
    - Purpose: Initial data organization and analysis
    - Run order:
      1. organize_dataset.py: Combines multiple YOLOv5 datasets into unified format
-     2. data_analysis.R: Performs statistical analysis on dataset
-     3. data_visualization.ipynb: Visualizes dataset characteristics
+     2. data_process.py: Processes images for model training
+     3. data_analysis.R: Performs statistical analysis on dataset
+     4. data_visualization.ipynb: Visualizes dataset characteristics
    - Run these FIRST before proceeding to model development
 
 2. Development Phase (notebooks/)
@@ -80,6 +89,13 @@ Project Workflow and Folder Usage Guide
      - Trained model weights
      - Performance plots
      - Evaluation metrics
+
+5. Debug Information (data/debug/)
+   - Purpose: Stores intermediate processing steps for troubleshooting
+   - Contains:
+     - Sample images at various processing stages
+     - Automatically generated during processing with debug=True
+   - Contents are gitignored but folder structure is preserved
 
 Note: This structure separates experimental code (notebooks/) 
 from production code (src/) while keeping data preparation 
