@@ -10,3 +10,6 @@ data/debug/*
 !data/data_raw/.gitkeep
 !data/data_processed/.gitkeep
 !data/debug/.gitkeep
+
+# VS Code
+.vscode/

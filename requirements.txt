@@ -1,8 +1,20 @@
-tensorflow
-efficientnet
-numpy
-opencv-python
-pillow
-matplotlib
-pyyaml
-scikit-learn
+# Core Image Processing
+opencv-python==4.8.1.78
+Pillow==10.1.0
+imagehash==4.3.1
+numpy==1.24.3
+
+# Data Handling
+pyyaml==6.0.1
+
+# Visualization (used in data_process for debugging)
+matplotlib==3.8.2
+
+# Standard libraries used (no installation needed):
+# - os
+# - shutil
+# - pathlib
+# - logging
+# - collections
+# - random
+# - typing
