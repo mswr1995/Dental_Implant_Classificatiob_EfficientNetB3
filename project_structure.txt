@@ -3,6 +3,10 @@ dental-implant-classification/
 ├── data/
 │   ├── data_collected/                  # Original YOLOv5 datasets
 │   ├── data_raw/                        # Unified dataset
+│   │   ├── Bego/
+│   │   ├── Bicon/
+│   │   └── ...
+│   ├── data_processed/                  # Processed dataset
 │   │   ├── train/
 │   │   │   ├── Bego/
 │   │   │   ├── Bicon/

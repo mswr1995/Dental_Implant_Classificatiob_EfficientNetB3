@@ -3,6 +3,8 @@ import shutil
 from pathlib import Path
 import yaml
 import logging
+from collections import Counter
+from typing import Dict, Set
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -19,18 +21,47 @@ class DatasetCombiner:
         logger.info(f"Data collection path: {self.collected_data_path}")
         logger.info(f"Output path: {self.output_path}")
         
-        self.valid_classes = {'Bego', 'Bicon', 'ITI', 'ADIN', 'DIONAVI', 
-                            'Dentium', 'MIS', 'NORIS', 'nobel', 'osstem'}
+        # Define valid classes and their variations
+        self.valid_classes = {
+            'Bego', 'Bicon', 'ITI', 'ADIN', 'DIONAVI', 
+            'Dentium', 'MIS', 'NORIS', 'nobel', 'osstem'
+        }
         
-        # Class name mappings for normalization
+        # Enhanced class mappings with more variations
         self.class_mappings = {
             'nobel': 'nobel',
             'Nobel': 'nobel',
             'NOBEL': 'nobel',
+            'Nobel Biocare': 'nobel',
             'osstem': 'osstem',
             'Osstem': 'osstem',
             'OSSTEM': 'osstem',
-            # Add more mappings as needed
+            'bego': 'Bego',
+            'BEGO': 'Bego',
+            'bicon': 'Bicon',
+            'BICON': 'Bicon',
+            'iti': 'ITI',
+            'ITI': 'ITI',
+            'straumann': 'ITI',  # ITI is also known as Straumann
+            'Straumann': 'ITI',
+            'adin': 'ADIN',
+            'ADIN': 'ADIN',
+            'dionavi': 'DIONAVI',
+            'DIONAVI': 'DIONAVI',
+            'dentium': 'Dentium',
+            'DENTIUM': 'Dentium',
+            'mis': 'MIS',
+            'MIS': 'MIS',
+            'noris': 'NORIS',
+            'NORIS': 'NORIS'
+        }
+        
+        # Track statistics
+        self.dataset_stats = {
+            'total_images': 0,
+            'class_distribution': Counter(),
+            'source_distribution': Counter(),
+            'skipped_images': 0
         }
 
     def normalize_class_name(self, name):
@@ -112,40 +143,53 @@ class DatasetCombiner:
             self.copy_images_with_labels(split_dir, labels_dir, class_mapping)
 
     def copy_images_with_labels(self, images_dir, labels_dir, class_mapping):
-        """Copy images that have corresponding labels to appropriate class folders."""
+        """Enhanced copy method with better tracking and validation."""
         processed = 0
         skipped = 0
         
         for image_file in images_dir.glob('*.*'):
             if image_file.suffix.lower() not in ['.jpg', '.jpeg', '.png']:
+                skipped += 1
                 continue
 
-            label_file = labels_dir / f"{image_file.stem}.txt"
-            if not label_file.exists():
-                continue
-
-            # Try to get class from filename first
+            # Get class name
             class_name = self.get_class_from_filename(image_file.stem)
-            
-            # If no class from filename, try to get from label file
-            if not class_name and label_file.exists():
-                try:
-                    with open(label_file, 'r') as f:
-                        first_line = f.readline().strip()
-                        if first_line:
-                            class_idx = first_line.split()[0]
-                            class_name = class_mapping.get(class_idx)
-                except Exception as e:
-                    logger.warning(f"Error reading label file {label_file}: {e}")
+            if not class_name:
+                # Try to get class from label file
+                label_file = labels_dir / f"{image_file.stem}.txt"
+                if label_file.exists():
+                    try:
+                        with open(label_file, 'r') as f:
+                            first_line = f.readline().strip()
+                            if first_line:
+                                class_idx = first_line.split()[0]
+                                class_name = class_mapping.get(class_idx)
+                    except Exception as e:
+                        logger.warning(f"Error reading label file {label_file}: {e}")
 
             if class_name and class_name in self.valid_classes:
                 dest_path = self.output_path / class_name / image_file.name
+                
+                # Check if destination already exists
+                if dest_path.exists():
+                    # Add a suffix to make the filename unique
+                    counter = 1
+                    while dest_path.exists():
+                        new_name = f"{image_file.stem}_{counter}{image_file.suffix}"
+                        dest_path = self.output_path / class_name / new_name
+                        counter += 1
+
+                # Copy the file
                 shutil.copy2(image_file, dest_path)
                 processed += 1
-                logger.debug(f"Copied {image_file} to {dest_path}")
+                
+                # Update statistics
+                self.dataset_stats['total_images'] += 1
+                self.dataset_stats['class_distribution'][class_name] += 1
+                self.dataset_stats['source_distribution'][images_dir.parent.parent.name] += 1
             else:
                 skipped += 1
-                logger.debug(f"Skipped {image_file} - no valid class found")
+                self.dataset_stats['skipped_images'] += 1
 
         logger.info(f"Processed {processed} images, skipped {skipped} images in {images_dir}")
 
@@ -156,17 +200,38 @@ class DatasetCombiner:
 
         # Process each dataset directory
         for dataset_dir in self.collected_data_path.iterdir():
-            if dataset_dir.is_dir():  # Remove the yolov5pytorch check
+            if dataset_dir.is_dir():
                 logger.info(f"Processing dataset: {dataset_dir}")
                 self.process_dataset(dataset_dir)
-            
-        # Log summary of processed datasets
-        logger.info("Processed datasets:")
-        for dataset_dir in self.collected_data_path.iterdir():
-            if dataset_dir.is_dir():
-                logger.info(f"- {dataset_dir.name}")
+                
+        # Log comprehensive statistics
+        self._log_statistics()
 
-        logger.info("Dataset combination completed!")
+    def _log_statistics(self):
+        """Log detailed statistics about the combined dataset."""
+        logger.info("\n=== Dataset Combination Statistics ===")
+        
+        logger.info("\nClass Distribution:")
+        for class_name, count in self.dataset_stats['class_distribution'].most_common():
+            percentage = (count / self.dataset_stats['total_images']) * 100
+            logger.info(f"{class_name}: {count} images ({percentage:.2f}%)")
+        
+        logger.info("\nSource Distribution:")
+        for source, count in self.dataset_stats['source_distribution'].most_common():
+            percentage = (count / self.dataset_stats['total_images']) * 100
+            logger.info(f"{source}: {count} images ({percentage:.2f}%)")
+        
+        logger.info(f"\nTotal Images: {self.dataset_stats['total_images']}")
+        logger.info(f"Skipped Images: {self.dataset_stats['skipped_images']}")
+        
+        # Check for class imbalance
+        min_class_count = min(self.dataset_stats['class_distribution'].values())
+        max_class_count = max(self.dataset_stats['class_distribution'].values())
+        imbalance_ratio = max_class_count / min_class_count if min_class_count > 0 else float('inf')
+        
+        logger.info(f"\nClass Imbalance Ratio: {imbalance_ratio:.2f}")
+        if imbalance_ratio > 3:
+            logger.warning("High class imbalance detected! Consider data augmentation or balancing techniques.")
 
 def main():
     combiner = DatasetCombiner(

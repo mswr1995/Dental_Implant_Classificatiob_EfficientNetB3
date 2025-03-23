@@ -1,1 +1,10 @@
+# Virtual environment
 venv/
+
+# Data directories
+data/data_raw/*
+data/data_processed/*
+
+# Keep .gitkeep files to maintain directory structure
+!data/data_raw/.gitkeep
+!data/data_processed/.gitkeep
