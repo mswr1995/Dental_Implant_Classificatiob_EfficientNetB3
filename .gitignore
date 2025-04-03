@@ -13,3 +13,6 @@ data/debug/*
 
 # VS Code
 .vscode/
+
+# temporarily
+results/
