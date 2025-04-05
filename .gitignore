@@ -5,13 +5,13 @@ venv/
 data/data_raw/*
 data/data_processed/*
 data/debug/*
-data/classification_datasets/*
+
 
 # Keep .gitkeep files to maintain directory structure
 !data/data_raw/.gitkeep
 !data/data_processed/.gitkeep
 !data/debug/.gitkeep
-!data/classification_datasets/.gitkeep
+
 
 # VS Code
 .vscode/
